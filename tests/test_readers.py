@@ -1,0 +1,135 @@
+import datetime as dt
+import json
+
+import pytest
+import xlsxwriter
+
+from tuna.readers import ReadOptions, read_file
+
+OPTS = ReadOptions()
+
+
+def _one(path, fmt, opts=OPTS):
+    (t,) = read_file(path, path.name, fmt, opts)
+    return t
+
+
+def test_semicolon_csv(tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("id;name;day\n1;x;2024-01-02\n2;y;2024-01-03\n", encoding="utf-8")
+    t = _one(p, "csv")
+    assert t.fields == {"id": {"int"}, "name": {"str"}, "day": {"date"}}
+    assert t.rows == 2
+    assert t.stats["id"].max == 2
+
+
+def test_tsv(tmp_path):
+    p = tmp_path / "a.tsv"
+    p.write_text("a\tb\n1\t2.5\n", encoding="utf-8")
+    assert _one(p, "tsv").fields == {"a": {"int"}, "b": {"float"}}
+
+
+def test_bom_header(tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_bytes("﻿id,v\n1,2\n".encode())
+    assert list(_one(p, "csv").fields) == ["id", "v"]
+
+
+def test_ragged_csv_reads(tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("a,b\n1,2\n3,4,5\n6\n", encoding="utf-8")
+    t = _one(p, "csv")
+    assert list(t.fields) == ["a", "b"]
+    assert t.rows == 3
+
+
+def test_bad_inference_falls_back_with_warning(tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("a,b\n1,2\n3,4\nx,5\n", encoding="utf-8")
+    t = _one(p, "csv", ReadOptions(sample_rows=2))
+    assert t.warnings and "text" in t.warnings[0]
+    assert t.fields["a"] == {"str"}
+
+
+def test_sample_rows_limits_stats_not_rows(tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("n\n" + "\n".join(str(i) for i in range(50)) + "\n", encoding="utf-8")
+    t = _one(p, "csv", ReadOptions(sample_rows=10))
+    assert t.rows == 50
+    assert t.stats["n"].count == 10
+    full = _one(p, "csv", ReadOptions(sample_rows=None))
+    assert full.rows == 50 and full.stats["n"].count == 50
+
+
+def test_xlsx_two_sheets(tmp_path):
+    p = tmp_path / "book.xlsx"
+    wb = xlsxwriter.Workbook(p)
+    s1 = wb.add_worksheet("first")
+    s1.write_row(0, 0, ["a", "b"])
+    for i in range(5):
+        s1.write_row(i + 1, 0, [i, f"t{i}"])
+    s2 = wb.add_worksheet("second")
+    s2.write_row(0, 0, ["x"])
+    s2.write_row(1, 0, [1.5])
+    wb.add_worksheet("empty")
+    wb.close()
+    tables = read_file(p, "book.xlsx", "xlsx", ReadOptions(sample_rows=2))
+    assert [t.sheet for t in tables] == ["first", "second"]
+    assert tables[0].rows == 5
+    assert tables[0].fields == {"a": {"float"}, "b": {"str"}}  # Excel stores numbers as floats
+    assert tables[0].stats["b"].count == 2
+    assert "empty" in tables[0].warnings[0]
+
+
+def test_nested_json_object(tmp_path):
+    p = tmp_path / "a.json"
+    doc = {"name": "x", "meta": {"v": 1}, "items": [{"id": 1}, {"id": 2, "tag": "t"}], "tags": ["a", "b"]}
+    p.write_text(json.dumps(doc), encoding="utf-8")
+    t = _one(p, "json")
+    assert t.rows == 1
+    assert t.fields == {
+        "name": {"str"},
+        "meta.v": {"int"},
+        "items[]": {"array"},
+        "items[].id": {"int"},
+        "items[].tag": {"str"},
+        "tags[]": {"str"},
+    }
+    assert t.stats["items[].id"].count == 2
+
+
+def test_json_root_list_and_iso_dates(tmp_path):
+    p = tmp_path / "a.json"
+    recs = [{"d": "2024-01-01", "ts": "2024-01-01T10:00:00", "s": "2024-01-01x"}, {"d": None}, 5]
+    p.write_text(json.dumps(recs), encoding="utf-8")
+    t = _one(p, "json")
+    assert t.rows == 3
+    assert t.fields["d"] == {"date", "null"}
+    assert t.fields["ts"] == {"datetime"}
+    assert t.fields["s"] == {"str"}
+    assert t.fields["value"] == {"int"}
+    assert t.stats["d"].min == "2024-01-01"
+
+
+def test_json_sample_rows_limits_stats(tmp_path):
+    p = tmp_path / "a.json"
+    p.write_text(json.dumps([{"n": i} for i in range(20)] + [{"n": "late"}]), encoding="utf-8")
+    t = _one(p, "json", ReadOptions(sample_rows=5))
+    assert t.fields["n"] == {"int", "str"}
+    assert t.stats["n"].count == 5
+
+
+def test_yaml_multi_doc(tmp_path):
+    p = tmp_path / "a.yaml"
+    p.write_text("a: 1\nwhen: 2024-01-01\n---\na: 2\n", encoding="utf-8")
+    t = _one(p, "yaml")
+    assert t.rows == 2
+    assert t.fields == {"a": {"int"}, "when": {"date"}}
+    assert t.stats["when"].min == dt.date(2024, 1, 1)
+
+
+def test_bad_json_raises(tmp_path):
+    p = tmp_path / "a.json"
+    p.write_text("{nope", encoding="utf-8")
+    with pytest.raises(ValueError):
+        _one(p, "json")
