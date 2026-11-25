@@ -158,3 +158,38 @@ def test_terminal_shows_file_sets(tree, capsys):
     assert cli.main([str(tree)]) == 0
     out = capsys.readouterr().out
     assert ".dcm" in out and "scan_{int}.dcm" in out
+
+
+def test_no_resolve_without_outputs_and_one_ext_per_path(tree, monkeypatch):
+    import pathlib
+
+    from tuna import report
+
+    calls = {"resolve": 0, "ext": 0}
+    real_resolve, real_ext = pathlib.Path.resolve, report.ext_of
+
+    def resolve(self, *a, **k):
+        calls["resolve"] += 1
+        return real_resolve(self, *a, **k)
+
+    def ext_of(p):
+        calls["ext"] += 1
+        return real_ext(p)
+
+    for i in range(5):
+        (tree / f"x{i}.dat").write_text("", encoding="utf-8")
+    monkeypatch.setattr(pathlib.Path, "resolve", resolve)
+    monkeypatch.setattr(report, "ext_of", ext_of)
+    assert cli.main([str(tree), "-q"]) == 0
+    assert calls == {"resolve": 0, "ext": 6}
+
+
+def test_markdown_folders_capped(tmp_path):
+    root = tmp_path / "t"
+    for i in range(25):
+        d = root / f"d{i}x"
+        d.mkdir(parents=True)
+        (d / "a.csv").write_text(f"c{i}\n1\n", encoding="utf-8")
+    md, rep = _run([root], tmp_path)
+    assert len(rep["folders"]) == 25
+    assert "… 5 more" in md.split("## Folders")[1]

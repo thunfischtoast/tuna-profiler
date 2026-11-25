@@ -68,7 +68,7 @@ def _group(g: Group) -> list[str]:
         present = "all" if f.present_in == g.tables else f"{f.present_in}/{g.tables}"
         nulls = "" if f.nulls_pct is None else f"{f.nulls_pct:g}%"
         frows.append([
-            f"`{f.name}`", fmt_type(f, g.tables), present, nulls, fmt_value(f.distinct),
+            f"`{f.name}`", fmt_type(f), present, nulls, fmt_value(f.distinct),
             fmt_value(f.min), fmt_value(f.max), fmt_value(f.mean), fmt_top(f.top),
         ])
     out += _table(["field", "type", "present", "nulls", "distinct", "min", "max", "mean", "top"], frows)
@@ -105,10 +105,12 @@ def render_markdown(report: Report) -> str:
             out += [f"### {fs.ext} ({plural(fs.files, 'file')})", ""]
             out += _paths(fs.paths, fs.unmatched)
     out += ["## Folders", ""]
-    out += _table(
-        ["folder", "folders", "contents"],
-        [[f"`{f.pattern}`", f.folders, fmt_contents(f.contents)] for f in report.folders],
-    )
+    folder_rows: list[list[object]] = [
+        [f"`{f.pattern}`", f.folders, fmt_contents(f.contents)] for f in report.folders[:PATTERN_CAP]
+    ]
+    if len(report.folders) > PATTERN_CAP:
+        folder_rows.append([f"… {len(report.folders) - PATTERN_CAP} more", "", ""])
+    out += _table(["folder", "folders", "contents"], folder_rows)
     out.append("")
     if report.errors:
         out += ["## Errors", ""]

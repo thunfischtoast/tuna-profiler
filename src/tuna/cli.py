@@ -100,9 +100,16 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"path not found: {root}")
     try:
         files, ignored = discover(root, args.include, args.exclude, args.max_depth, args.hidden)
-        outputs = {o.resolve() for o in args.output}
-        files = [f for f in files if f.resolve() not in outputs]
-        ignored = [f for f in ignored if f.resolve() not in outputs]
+        if args.output:
+            # Resolve only same-named files: real trees hold hundreds of thousands of paths.
+            outputs = {o.resolve() for o in args.output}
+            names = {o.name for o in outputs}
+
+            def is_output(f: Path) -> bool:
+                return f.name in names and f.resolve() in outputs
+
+            files = [f for f in files if not is_output(f)]
+            ignored = [f for f in ignored if not is_output(f)]
     except ValueError as e:
         parser.error(str(e))
 

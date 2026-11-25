@@ -56,7 +56,7 @@ def _fields(g: Group) -> Table:
         present = "all" if f.present_in == g.tables else f"{f.present_in}/{g.tables}"
         nulls = "" if f.nulls_pct is None else f"{f.nulls_pct:g}"
         last = fmt_value(f.max) if f.max is not None else fmt_top(f.top)
-        cells = (f.name, fmt_type(f, g.tables), present, nulls, fmt_value(f.distinct), fmt_value(f.min), last)
+        cells = (f.name, fmt_type(f), present, nulls, fmt_value(f.distinct), fmt_value(f.min), last)
         t.add_row(*(Text(c) for c in cells))
     return t
 

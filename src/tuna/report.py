@@ -116,7 +116,7 @@ def _summarize_field(name: str, members: list[TableProfile]) -> FieldSummary:
     fs = FieldSummary(name, shown, len(having))
     variants = Counter(display_type(t.fields[name]) for t in having if families(t.fields[name]))
     if len({families(set(v.split("|"))) for v in variants}) > 1:
-        fs.type_variants = dict(variants.most_common())
+        fs.type_variants = dict(sorted(variants.items(), key=lambda v: (-v[1], v[0])))
     parts = [t.stats[name] for t in having if name in t.stats]
     if not parts:
         return fs
@@ -138,6 +138,8 @@ def _summarize_field(name: str, members: list[TableProfile]) -> FieldSummary:
 
 
 def _sheets(members: list[TableProfile]) -> list[str]:
+    if any(t.sheet is None for t in members):
+        return []
     per_file: dict[str, set[str]] = defaultdict(set)
     for t in members:
         if t.sheet is not None:
@@ -151,10 +153,10 @@ def ext_of(path: str) -> str:
     return split_ext(path)[1].lower() or "(none)"
 
 
-def _file_sets(ignored: list[str], min_files: int) -> list[FileSet]:
+def _file_sets(ignored: dict[str, str], min_files: int) -> list[FileSet]:
     by_ext: dict[str, list[str]] = defaultdict(list)
-    for path in ignored:
-        by_ext[ext_of(path)].append(path)
+    for path, ext in ignored.items():
+        by_ext[ext].append(path)
     sets = []
     for ext, paths in by_ext.items():
         patterns, unmatched = infer_patterns(sorted(paths), min_files)
@@ -221,9 +223,10 @@ def build_report(
                 members=[Member(t.path, t.sheet, t.rows) for t in members],
             )
         )
-    file_sets = _file_sets(ignored, min_files)
-    for path in ignored:
-        folder_contents[_folder(path)][ext_of(path)] += 1
+    exts = {path: ext_of(path) for path in ignored}
+    file_sets = _file_sets(exts, min_files)
+    for path, ext in exts.items():
+        folder_contents[_folder(path)][ext] += 1
     order = {g.id: i for i, g in enumerate(groups)}
     order.update({fs.ext: len(groups) + i for i, fs in enumerate(file_sets)})
 
@@ -234,7 +237,7 @@ def build_report(
         duration_s=round(duration, 2),
         files_found=len(profiled) + len(errors),
         files_profiled=len(profiled),
-        ignored=dict(sorted(Counter(ext_of(p) for p in ignored).items())),
+        ignored=dict(sorted(Counter(exts.values()).items())),
         errors=errors,
         warnings=[
             FileError(f"{t.path} [{t.sheet}]" if t.sheet else t.path, w) for t in tables for w in t.warnings
@@ -287,12 +290,13 @@ def fmt_top(top: list[list[Any]] | None, n: int = 3) -> str:
 PATTERN_CAP = 20
 
 
-def fmt_type(f: FieldSummary, tables: int) -> str:
+def fmt_type(f: FieldSummary) -> str:
     """Field type plus the minority type variants, as ``int|str (str in 3/511)``."""
     if not f.type_variants:
         return f.type
+    typed = sum(f.type_variants.values())  # tables having the field with a non-null type
     minority = list(f.type_variants.items())[1:]
-    return f.type + " " + ", ".join(f"({t} in {n}/{tables})" for t, n in minority)
+    return f.type + " " + ", ".join(f"({t} in {n}/{typed})" for t, n in minority)
 
 
 def fmt_contents(contents: list[tuple[str, int]]) -> str:

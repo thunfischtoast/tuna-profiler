@@ -94,3 +94,27 @@ def test_empty_array_children_are_optional_in_report():
     present = {f.name: f.present_in for f in group.fields}
     assert present["structures[]"] == 4
     assert present["structures[].f0"] == 3
+
+
+def test_type_variants_denominator_and_ties():
+    from tuna.report import build_report, fmt_type
+
+    ys = {f"y{i}": "str" for i in range(5)}
+    tables = [_t("a.csv", x="str", **ys), _t("b.csv", x="int", **ys), _t("c.csv", **ys)]
+    tables.append(_t("d.csv", x="null", **ys))
+    rep = build_report(".", tables, [], [], {}, 0.0)
+    (g,) = rep.groups
+    x = g.fields[0]
+    assert x.type_variants == {"int": 1, "str": 1}
+    assert fmt_type(x) == "int|str (str in 1/2)"
+
+
+def test_sheets_only_for_all_excel_groups():
+    from tuna.report import build_report
+
+    xl = _t("b.xlsx", x="int")
+    xl.sheet, xl.format = "S", "xlsx"
+    rep = build_report(".", [_t("a.csv", x="int"), xl], [], [], {}, 0.0)
+    assert rep.groups[0].sheets == []
+    rep = build_report(".", [xl], [], [], {}, 0.0)
+    assert rep.groups[0].sheets == ["S"]
