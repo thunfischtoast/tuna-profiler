@@ -1,6 +1,6 @@
-# tuna
+# tuna-profiler
 
-tuna profiles the structure of a folder of data files. It reads CSV, TSV, Excel, JSON and YAML files, finds the files that share a structure and describes each structure once: its fields, their types and basic statistics, the folders it occurs in and the naming pattern of its files.
+tuna-profiler profiles the structure of a folder of data files. It reads CSV, TSV, Excel, JSON and YAML files, finds the files that share a structure and describes each structure once: its fields, their types and basic statistics, the folders it occurs in and the naming pattern of its files.
 
 Use it to get an overview of an unfamiliar data dump, an export directory or a config tree before you write code against it.
 
@@ -16,7 +16,7 @@ With pipx:
 pipx install git+https://github.com/thunfischtoast/tuna-profiler
 ```
 
-tuna needs Python 3.10 or newer.
+tuna-profiler needs Python 3.10 or newer.
 
 ## Usage
 
@@ -100,7 +100,7 @@ Empty and whitespace-only strings count as null, and the null percentage include
 
 Tables share a structure when they have similar field names in any order. A field whose type differs between tables (for example int in most files and str in a few) does not split the structure; the report shows the variants, as in `int|str (str in 3/511)`. With `--strict-types`, conflicting types split structures as in v1: int and float are compatible, as are date and datetime, and an all-null column is compatible with anything. A table may miss some fields of its structure, as long as the shared field names make up at least 80 % of all field names of the two (Jaccard similarity). In practice, tables with 4 fields or fewer must have exactly the same field names. With 5 to 9 fields, one missing or extra field is tolerated, and with 10 fields, two. Fields that only some tables have are shown as "present in 3/40". An empty list gives only the field `key[]` and no `key[].*` fields, so when one table has an empty `key[]`, the `key[].*` fields of the other table are left out of the comparison.
 
-tuna looks for common patterns among the relative paths of each structure. Dates (`YYYY-MM-DD`, `YYYY_MM_DD`, `YYYYMMDD`, `DD.MM.YYYY`, `YYYY-MM`), timestamps (`YYYYMMDD_HHMMSS`), UUIDs, hex ids (`ANON01d63767` gives `ANON{hex}`), dotted ids such as DICOM UIDs (`{uid}`), numbers and words become placeholders, and the report shows the range of each placeholder. Paths that fit no pattern are listed by name. Each structure shows at most 20 patterns.
+tuna-profiler looks for common patterns among the relative paths of each structure. Dates (`YYYY-MM-DD`, `YYYY_MM_DD`, `YYYYMMDD`, `DD.MM.YYYY`, `YYYY-MM`), timestamps (`YYYYMMDD_HHMMSS`), UUIDs, hex ids (`ANON01d63767` gives `ANON{hex}`), dotted ids such as DICOM UIDs (`{uid}`), numbers and words become placeholders, and the report shows the range of each placeholder. Paths that fit no pattern are listed by name. Each structure shows at most 20 patterns.
 
 Files with unsupported extensions are grouped by extension into file sets, which get path patterns the same way. Their contents are not read.
 
