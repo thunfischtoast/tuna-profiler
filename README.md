@@ -88,13 +88,14 @@ Globs use `fnmatch` syntax and are matched against the path relative to PATH and
 
 Each CSV or TSV file, each Excel sheet and each JSON or YAML file becomes one table. Nested JSON and YAML is flattened: object keys are joined with `.`, and list elements appear under `key[]`. A root list counts as one row per element. JSON strings in ISO format (`2024-01-31`, `2024-01-31T10:00`) are typed as dates.
 
-Tables share a structure when they have similar field names in any order and compatible types. int and float are compatible, as are date and datetime, and an all-null column is compatible with anything. A table may miss a few fields of its structure, as long as at least 80 % of the combined field names are shared (Jaccard similarity). Fields that only some tables have are shown as "present in 3/40".
+Tables share a structure when they have similar field names in any order and compatible types. int and float are compatible, as are date and datetime, and an all-null column is compatible with anything. A table may miss some fields of its structure, as long as the shared field names make up at least 80 % of all field names of the two (Jaccard similarity). In practice, tables with 4 fields or fewer must have exactly the same field names. With 5 to 9 fields, one missing or extra field is tolerated, and with 10 fields, two. Fields that only some tables have are shown as "present in 3/40".
 
 Within a folder, tuna looks for a common name pattern among the files of one structure. Dates (`YYYY-MM-DD`, `YYYY_MM_DD`, `YYYYMMDD`, `DD.MM.YYYY`, `YYYY-MM`), timestamps (`YYYYMMDD_HHMMSS`), UUIDs, numbers and words become placeholders, and the report shows the range of each placeholder. Files that fit no pattern are listed by name.
 
 ## Limits
 
-- JSON and YAML files are parsed fully into memory.
-- The schema of CSV and Excel files is inferred from the sampled rows (`--sample-rows`); a column that changes type after that sample is reported with the type of the sample. Row counts are always exact.
+- JSON and YAML files are parsed fully into memory. Only a root list is sampled by rows; a root object that holds a big list counts as one row, and all of its list elements are read.
+- The schema of CSV files is inferred from the first `--sample-rows` rows, also with `--full`. A later value that does not fit the inferred type is read as null, and the file gets a warning. Row counts are always exact.
+- An empty (0-byte) CSV file is reported as an error. A CSV file with only a header row gives fields of type null.
 - Statistics come from the first N rows of each file unless `--full` is given.
 - Excel stores all numbers as floats, so integer columns in Excel files appear as float.
