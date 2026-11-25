@@ -63,6 +63,8 @@ def discover(
         for f in filenames:
             if not hidden and f.startswith("."):
                 continue
+            if fnmatch.fnmatch(f.lower(), "~$*.xls*"):  # Excel owner/lock files
+                continue
             rel = prefix + f
             if _matches(rel, exclude) or (include and not _matches(rel, include)):
                 continue

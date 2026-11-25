@@ -24,6 +24,8 @@ from tuna.report import build_report
 
 _RENDERERS = {".md": render_markdown, ".json": render_json}
 _PARALLEL_MIN_FILES = 8
+# ProcessPoolExecutor rejects more than 61 workers on Windows (WaitForMultipleObjects limit).
+_WINDOWS_MAX_WORKERS = 61
 
 Job = tuple[str, str, str, ReadOptions]
 Result = tuple[list[TableProfile], FileError | None]
@@ -41,11 +43,25 @@ def profile_one(job: Job) -> Result:
 
 def _run(jobs: list[Job], workers: int) -> Iterator[Result]:
     if workers > 1 and len(jobs) >= _PARALLEL_MIN_FILES:
+        if sys.platform == "win32":
+            workers = min(workers, _WINDOWS_MAX_WORKERS)
         with ProcessPoolExecutor(workers) as ex:
             for fut in as_completed([ex.submit(profile_one, j) for j in jobs]):
                 yield fut.result()
     else:
         yield from map(profile_one, jobs)
+
+
+def _at_least(low: int):
+    """argparse type for an int >= ``low``."""
+
+    def parse(text: str) -> int:
+        value = int(text)
+        if value < low:
+            raise argparse.ArgumentTypeError(f"must be >= {low}")
+        return value
+
+    return parse
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -54,15 +70,15 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", action="append", default=[], metavar="FILE", type=Path,
                    help=".md or .json by extension (repeatable)")
     p.add_argument("--full", action="store_true", help="read all rows for stats")
-    p.add_argument("--sample-rows", type=int, default=1000, metavar="N", help="rows per file for stats (default 1000)")
+    p.add_argument("--sample-rows", type=_at_least(1), default=1000, metavar="N", help="rows per file for stats (default 1000)")
     p.add_argument("--no-stats", action="store_true", help="schema and row counts only")
     p.add_argument("--include", action="append", default=[], metavar="GLOB", help="only matching files (repeatable)")
     p.add_argument("--exclude", action="append", default=[], metavar="GLOB", help="skip matching files and dirs (repeatable)")
-    p.add_argument("--max-depth", type=int, metavar="N", help="0 = only files directly in PATH")
+    p.add_argument("--max-depth", type=_at_least(0), metavar="N", help="0 = only files directly in PATH")
     p.add_argument("--hidden", action="store_true", help="include dot-files and dot-dirs")
-    p.add_argument("--min-pattern-files", type=int, default=3, metavar="N",
+    p.add_argument("--min-pattern-files", type=_at_least(2), default=3, metavar="N",
                    help="files needed for a name pattern (default 3)")
-    p.add_argument("-j", "--jobs", type=int, default=os.cpu_count() or 1, metavar="N",
+    p.add_argument("-j", "--jobs", type=_at_least(1), default=os.cpu_count() or 1, metavar="N",
                    help="worker processes (default: CPU count)")
     p.add_argument("-q", "--quiet", action="store_true", help="no terminal output")
     p.add_argument("--version", action="version", version=f"tuna {__version__}")
@@ -76,16 +92,24 @@ def main(argv: list[str] | None = None) -> int:
     for out in args.output:
         if out.suffix.lower() not in _RENDERERS:
             parser.error(f"unsupported output format: {out} (use .md or .json)")
+        if not out.resolve().parent.is_dir():
+            parser.error(f"output directory not found: {out.parent}")
     root: Path = args.path
     if not root.exists():
         parser.error(f"path not found: {root}")
     try:
         files, ignored = discover(root, args.include, args.exclude, args.max_depth, args.hidden)
+        outputs = {o.resolve() for o in args.output}
+        files = [f for f in files if f.resolve() not in outputs]
     except ValueError as e:
         parser.error(str(e))
 
     start = time.perf_counter()
-    opts = ReadOptions(sample_rows=None if args.full else args.sample_rows, stats=not args.no_stats)
+    opts = ReadOptions(
+        sample_rows=None if args.full else args.sample_rows,
+        stats=not args.no_stats,
+        schema_rows=args.sample_rows,
+    )
     base = root.parent if root.is_file() else root
     jobs = [(str(f), f.relative_to(base).as_posix(), FORMATS[f.suffix.lower()], opts) for f in files]
 

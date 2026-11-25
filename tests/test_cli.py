@@ -81,5 +81,54 @@ def test_table_warnings_reach_reports(tmp_path):
     p = tmp_path / "a.csv"
     p.write_text("a,b\n1,2\n3,4\nx,5\n", encoding="utf-8")
     md, rep = _run([p, "--sample-rows", "2"], tmp_path)
-    assert len(rep["warnings"]) == 1 and "text" in rep["warnings"][0]["message"]
+    assert len(rep["warnings"]) == 1 and "did not match" in rep["warnings"][0]["message"]
     assert "## Warnings" in md
+
+
+@pytest.mark.parametrize(
+    "opt", [["--sample-rows", "0"], ["--min-pattern-files", "1"], ["--jobs", "0"], ["--max-depth", "-1"]]
+)
+def test_invalid_numbers(tree, opt):
+    with pytest.raises(SystemExit) as e:
+        cli.main([str(tree), *opt])
+    assert e.value.code == 2
+
+
+def test_output_dir_missing(tree, tmp_path):
+    with pytest.raises(SystemExit) as e:
+        cli.main([str(tree), "-q", "-o", str(tmp_path / "nope" / "r.md")])
+    assert e.value.code == 2
+
+
+def test_outputs_and_lock_files_not_profiled(tree, tmp_path):
+    (tree / "~$budget.xlsx").write_bytes(b"lock")
+    out = tree / "r.json"
+    for _ in range(2):
+        assert cli.main([str(tree), "-q", "-o", str(out)]) == 0
+    rep = json.loads(out.read_text(encoding="utf-8"))
+    paths = {m["path"] for g in rep["groups"] for m in g["members"]}
+    assert "r.json" not in paths
+    assert rep["files_found"] == 8
+
+
+def test_windows_worker_clamp(tree, monkeypatch):
+    seen = []
+
+    class FakePool:
+        def __init__(self, workers):
+            seen.append(workers)
+            raise RuntimeError("stop")
+
+    monkeypatch.setattr(cli, "ProcessPoolExecutor", FakePool)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    jobs = [(str(tree / "notes.txt"), "notes.txt", "csv", None)] * 8
+    with pytest.raises(RuntimeError):
+        list(cli._run(jobs, 100))
+    assert seen == [61]
+
+
+def test_terminal_output(tree, capsys):
+    assert cli.main([str(tree)]) == 0
+    out = capsys.readouterr().out
+    assert "S1" in out and "sales_{date:YYYY-MM-DD}.csv" in out
+    assert "broken.json" in out
