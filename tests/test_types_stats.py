@@ -61,3 +61,9 @@ def test_series_and_values_agree():
     w2 = stats_from_values(words)
     for attr in ("count", "nulls", "min", "max", "min_len", "max_len", "distinct", "top"):
         assert getattr(w1, attr) == getattr(w2, attr), attr
+
+
+def test_empty_merges():
+    a = FieldStats(nulls=2, empty=1)
+    a.merge(FieldStats(nulls=1, empty=1))
+    assert (a.nulls, a.empty) == (3, 2)

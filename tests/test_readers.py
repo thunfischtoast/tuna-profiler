@@ -238,3 +238,10 @@ def test_whitespace_cells_in_excel(tmp_path):
     (t,) = read_file(p, "b.xlsx", "xlsx", OPTS)
     assert t.fields["a"] == {"float"}
     assert t.stats["a"].nulls == 1
+
+
+def test_blank_cells_do_not_turn_nan_text_into_float(tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("v,w\nnan,1.5\n  ,\n-INF,2.5\n", encoding="utf-8")
+    t = _one(p, "csv")
+    assert t.fields == {"v": {"str"}, "w": {"float"}}

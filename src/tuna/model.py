@@ -36,11 +36,17 @@ def safe_max(a: Any, b: Any) -> Any:
 
 @dataclass
 class FieldStats:
-    """Mergeable partial aggregate of one field's values."""
+    """Mergeable partial aggregate of one field's values.
+
+    ``empty`` counts blank strings, which are also counted in ``nulls``. Its meaning
+    depends on the format: CSV counts whitespace-only cells (empty cells are plain
+    nulls), Excel always counts 0 (fastexcel turns blanks into nulls), and JSON/YAML
+    count empty and whitespace-only strings.
+    """
 
     count: int = 0
     nulls: int = 0
-    empty: int = 0  # blank strings, also counted in nulls
+    empty: int = 0
     min: Any = None
     max: Any = None
     sum: float = 0.0

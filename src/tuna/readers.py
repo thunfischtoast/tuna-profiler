@@ -106,12 +106,14 @@ def _reinfer(s: pl.Series) -> pl.Series:
     lower = s.str.to_lowercase()
     if set(lower.drop_nulls().unique().to_list()) <= {"true", "false"}:
         return lower == "true"
-    casts = (
+    # Plain inference keeps nan/inf text as str, so blanks must not make it float.
+    special = lower.str.strip_chars().str.replace(r"^[+-]", "").is_in(["nan", "inf", "infinity"]).any()
+    casts = [
         lambda: s.str.to_integer(strict=False),
-        lambda: s.cast(pl.Float64, strict=False),
+        *([] if special else [lambda: s.cast(pl.Float64, strict=False)]),
         lambda: s.str.to_date(strict=False),
         lambda: s.str.to_datetime(strict=False),
-    )
+    ]
     for cast in casts:
         try:
             out = cast()
