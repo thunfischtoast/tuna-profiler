@@ -1,0 +1,23 @@
+[project]
+name = "tuna-profiler"
+version = "0.1.0"
+description = "Structure profiler for folders of CSV, TSV, Excel, JSON and YAML files"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "thunfischtoast" }]
+requires-python = ">=3.10"
+dependencies = ["polars", "fastexcel", "pyyaml", "rich"]
+
+[project.scripts]
+tuna = "tuna.cli:main"
+
+[dependency-groups]
+dev = ["pytest", "xlsxwriter"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tuna"]
