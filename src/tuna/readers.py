@@ -98,6 +98,41 @@ def stats_from_series(s: pl.Series, type_name: str) -> FieldStats:
     return st
 
 
+def _reinfer(s: pl.Series) -> pl.Series:
+    """Type a string column again after its blank cells became null."""
+    nulls = s.null_count()
+    if nulls == s.len():
+        return s
+    lower = s.str.to_lowercase()
+    if set(lower.drop_nulls().unique().to_list()) <= {"true", "false"}:
+        return lower == "true"
+    casts = (
+        lambda: s.str.to_integer(strict=False),
+        lambda: s.cast(pl.Float64, strict=False),
+        lambda: s.str.to_date(strict=False),
+        lambda: s.str.to_datetime(strict=False),
+    )
+    for cast in casts:
+        try:
+            out = cast()
+        except Exception:  # noqa: BLE001, S112 - polars may fail to guess a format
+            continue
+        if out.null_count() == nulls:
+            return out
+    return s
+
+
+def _blank_to_null(s: pl.Series) -> tuple[pl.Series, int]:
+    """Turn empty and whitespace-only strings into nulls; return the series and their count."""
+    if s.dtype != pl.String:
+        return s, 0
+    blank = s.str.strip_chars() == ""
+    empty = int(blank.sum() or 0)
+    if not empty:
+        return s, 0
+    return _reinfer(s.clone().set(blank.fill_null(False), None)), empty
+
+
 def _profile_frame(
     df: pl.DataFrame,
     rel: str,
@@ -110,11 +145,12 @@ def _profile_frame(
     fields: dict[str, set[str]] = {}
     stats: dict[str, FieldStats] = {}
     for name in df.columns:
-        s = df[name]
+        s, empty = _blank_to_null(df[name])
         t = "null" if s.null_count() == s.len() else polars_type_name(s.dtype)
         fields[name] = {t}
         if opts.stats:
             stats[name] = stats_from_series(s, t)
+            stats[name].empty = empty
     return TableProfile(rel, sheet, fmt, rows, fields, stats, warnings)
 
 
@@ -162,7 +198,9 @@ def _read_excel(path: Path, rel: str, opts: ReadOptions) -> list[TableProfile]:
     out = []
     skipped = []
     for name in reader.sheet_names:
-        sheet = reader.load_sheet(name, n_rows=opts.sample_rows, schema_sample_rows=opts.schema_rows)
+        sheet = reader.load_sheet(
+            name, n_rows=opts.sample_rows, schema_sample_rows=opts.schema_rows, whitespace_as_null=True
+        )
         df = sheet.to_polars()
         if df.width == 0:
             skipped.append(name)
@@ -195,6 +233,8 @@ class _Collector:
 
     def add(self, path: str, value: Any) -> None:
         t = python_type_name(value)
+        if t == "str" and not value.strip():
+            t = "null"  # blank strings count as null (and as empty in the stats)
         self.mark(path, t)
         if t == "str":
             self.all_date[path] = self.all_date.get(path, True) and bool(_ISO_DATE.match(value))
@@ -246,6 +286,10 @@ def stats_from_values(values: list[Any]) -> FieldStats:
     for v in values:
         if v is None:
             st.nulls += 1
+            continue
+        if isinstance(v, str) and not v.strip():
+            st.nulls += 1
+            st.empty += 1
             continue
         st.count += 1
         t = python_type_name(v)

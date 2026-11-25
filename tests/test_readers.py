@@ -206,3 +206,35 @@ def test_xlsx_full_keeps_sampled_schema(tmp_path):
     full = read_file(p, "late.xlsx", "xlsx", ReadOptions(sample_rows=None, schema_rows=3))[0]
     assert full.fields == sampled.fields
     assert full.rows == sampled.rows == 6
+
+
+def test_blank_strings_in_json_are_null_and_empty(tmp_path):
+    p = tmp_path / "a.json"
+    p.write_text(json.dumps([{"n": 1}, {"n": ""}, {"n": "  "}, {"n": 4}]), encoding="utf-8")
+    t = _one(p, "json")
+    assert t.fields["n"] == {"int", "null"}
+    st = t.stats["n"]
+    assert (st.count, st.nulls, st.empty) == (2, 2, 2)
+
+
+def test_whitespace_cells_in_csv(tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("n,f,s\n1,1.5,a\n   ,  ,\n3,2.5, \n", encoding="utf-8")
+    t = _one(p, "csv")
+    assert t.fields == {"n": {"int"}, "f": {"float"}, "s": {"str"}}
+    assert (t.stats["n"].nulls, t.stats["n"].empty) == (1, 1)
+    assert t.stats["n"].max == 3
+    assert t.stats["s"].empty == 1
+
+
+def test_whitespace_cells_in_excel(tmp_path):
+    p = tmp_path / "b.xlsx"
+    wb = xlsxwriter.Workbook(p)
+    s = wb.add_worksheet("s")
+    s.write_row(0, 0, ["a"])
+    s.write_string(1, 0, "  ")
+    s.write_number(2, 0, 2)
+    wb.close()
+    (t,) = read_file(p, "b.xlsx", "xlsx", OPTS)
+    assert t.fields["a"] == {"float"}
+    assert t.stats["a"].nulls == 1

@@ -40,6 +40,7 @@ class FieldStats:
 
     count: int = 0
     nulls: int = 0
+    empty: int = 0  # blank strings, also counted in nulls
     min: Any = None
     max: Any = None
     sum: float = 0.0
@@ -52,6 +53,7 @@ class FieldStats:
         """Fold ``other`` into this aggregate in place."""
         self.count += other.count
         self.nulls += other.nulls
+        self.empty += other.empty
         self.sum += other.sum
         self.min = safe_min(self.min, other.min)
         self.max = safe_max(self.max, other.max)

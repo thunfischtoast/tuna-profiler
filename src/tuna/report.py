@@ -24,6 +24,7 @@ class FieldSummary:
     type: str
     present_in: int
     nulls_pct: float | None = None
+    empty: int | None = None
     distinct: int | str | None = None
     min: Any = None
     max: Any = None
@@ -118,6 +119,7 @@ def _summarize_field(name: str, members: list[TableProfile]) -> FieldSummary:
         st.merge(p)
     seen = st.count + st.nulls
     fs.nulls_pct = round(100 * st.nulls / seen, 1) if seen else None
+    fs.empty = st.empty
     fs.distinct = len(st.distinct) if st.distinct is not None else ">=10000"
     if set(shown.split("|")) <= _MINMAX_TYPES:
         fs.min, fs.max = st.min, st.max
