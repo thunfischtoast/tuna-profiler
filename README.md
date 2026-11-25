@@ -99,3 +99,7 @@ Within a folder, tuna looks for a common name pattern among the files of one str
 - An empty (0-byte) CSV file is reported as an error. A CSV file with only a header row gives fields of type null.
 - Statistics come from the first N rows of each file unless `--full` is given.
 - Excel stores all numbers as floats, so integer columns in Excel files appear as float.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
