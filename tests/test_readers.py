@@ -1,6 +1,7 @@
 import datetime as dt
 import json
 
+import polars as pl
 import pytest
 import xlsxwriter
 
@@ -43,12 +44,12 @@ def test_ragged_csv_reads(tmp_path):
     assert t.rows == 3
 
 
-def test_bad_inference_falls_back_with_warning(tmp_path):
+def test_schema_from_schema_rows(tmp_path):
     p = tmp_path / "a.csv"
     p.write_text("a,b\n1,2\n3,4\nx,5\n", encoding="utf-8")
-    t = _one(p, "csv", ReadOptions(sample_rows=2))
-    assert t.warnings and "text" in t.warnings[0]
-    assert t.fields["a"] == {"str"}
+    t = _one(p, "csv", ReadOptions(sample_rows=2, schema_rows=2))
+    assert t.fields["a"] == {"int"}
+    assert t.rows == 3
 
 
 def test_sample_rows_limits_stats_not_rows(tmp_path):
@@ -125,7 +126,7 @@ def test_yaml_multi_doc(tmp_path):
     t = _one(p, "yaml")
     assert t.rows == 2
     assert t.fields == {"a": {"int"}, "when": {"date"}}
-    assert t.stats["when"].min == dt.date(2024, 1, 1)
+    assert t.stats["when"].min == "2024-01-01"
 
 
 def test_bad_json_raises(tmp_path):
@@ -133,3 +134,60 @@ def test_bad_json_raises(tmp_path):
     p.write_text("{nope", encoding="utf-8")
     with pytest.raises(ValueError):
         _one(p, "json")
+
+
+def test_column_named_count(tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("count,name\n1,a\n1,b\n", encoding="utf-8")
+    t = _one(p, "csv")
+    assert t.stats["count"].top[1] == 2
+
+
+def test_json_with_bom(tmp_path):
+    p = tmp_path / "a.json"
+    p.write_bytes(b"\xef\xbb\xbf" + json.dumps({"a": 1}).encode())
+    assert _one(p, "json").fields == {"a": {"int"}}
+
+
+def test_yaml_trailing_separator(tmp_path):
+    p = tmp_path / "a.yaml"
+    p.write_text("a: 1\n---\na: 2\n---\n", encoding="utf-8")
+    t = _one(p, "yaml")
+    assert t.rows == 2
+    assert t.fields == {"a": {"int"}}
+
+
+def test_full_read_keeps_sampled_schema(tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("n,s\n" + "".join(f"{i},x\n" for i in range(30)) + "N/A,y\n", encoding="utf-8")
+    t = _one(p, "csv", ReadOptions(sample_rows=None, schema_rows=10))
+    assert t.fields == {"n": {"int"}, "s": {"str"}}
+    assert t.rows == 31
+    assert t.stats["n"].nulls == 1
+    assert any("did not match" in w for w in t.warnings)
+
+
+def test_duration_and_binary_series():
+    from tuna.readers import stats_from_series
+    from tuna.types import polars_type_name
+
+    dur = pl.Series("d", [dt.timedelta(hours=1), dt.timedelta(hours=30), None])
+    assert polars_type_name(dur.dtype) == "duration"
+    st = stats_from_series(dur, "duration")
+    assert (st.count, st.nulls, st.min_len) == (2, 1, None)
+    assert st.max == dt.timedelta(hours=30)
+    binary = pl.Series("b", [b"x", b"yz"])
+    assert polars_type_name(binary.dtype) == "binary"
+    assert stats_from_series(binary, "binary").count == 2
+    # A non-String series labelled "str" must not crash.
+    assert stats_from_series(pl.Series("c", [b"x"]), "str").min_len is None
+
+
+def test_temporal_minmax_normalized():
+    from tuna.readers import stats_from_series, stats_from_values
+
+    a = stats_from_values([dt.date(2024, 1, 5)])
+    a.merge(stats_from_values(["2023-12-01"]))
+    a.merge(stats_from_series(pl.Series("t", [dt.datetime(2024, 3, 1, 8)]), "datetime"))  # noqa: DTZ001
+    assert a.min == "2023-12-01"
+    assert a.max == "2024-03-01T08:00:00"

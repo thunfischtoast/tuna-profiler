@@ -1,6 +1,7 @@
 """Type names, type families and display rules.
 
-Type names: null, bool, int, float, str, date, datetime, time, object, array.
+Type names: null, bool, int, float, str, date, datetime, time, duration, object, array;
+other Polars dtypes keep their lowercased name (e.g. binary).
 """
 
 from __future__ import annotations
@@ -31,9 +32,13 @@ def polars_type_name(dtype: pl.DataType) -> str:
         return "array"
     if dtype == pl.Struct:
         return "object"
+    if dtype == pl.Duration:
+        return "duration"
     if dtype == pl.Null:
         return "null"
-    return "str"
+    if dtype in (pl.String, pl.Categorical, pl.Enum):
+        return "str"
+    return dtype.base_type().__name__.lower()
 
 
 def python_type_name(value: Any) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import json
 import re
 from collections import Counter
@@ -27,14 +28,25 @@ from tuna.types import polars_type_name, python_type_name
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ISO_DATETIME = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
 _TOP_TYPES = {"str", "bool", "int"}
+_MINMAX_TYPES = {"int", "float", "date", "datetime", "time", "duration", "str"}
+
+
+def iso_temporal(v: Any) -> Any:
+    """Turn dates and datetimes into ISO strings so they compare with JSON date strings."""
+    return v.isoformat() if isinstance(v, (dt.date, dt.datetime)) else v
 
 
 @dataclass
 class ReadOptions:
-    """How much of each file to read: ``sample_rows=None`` means all rows."""
+    """How much of each file to read.
+
+    ``sample_rows`` rows feed the stats (``None`` = all rows); the schema of tabular
+    files always comes from the first ``schema_rows`` rows.
+    """
 
     sample_rows: int | None = 1000
     stats: bool = True
+    schema_rows: int = 1000
 
 
 def read_file(path: Path, rel: str, fmt: str, opts: ReadOptions) -> list[TableProfile]:
@@ -44,12 +56,15 @@ def read_file(path: Path, rel: str, fmt: str, opts: ReadOptions) -> list[TablePr
     if fmt == "xlsx":
         return _read_excel(path, rel, opts)
     if fmt == "json":
-        with open(path, encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8-sig", errors="replace") as f:
             doc = json.load(f)
         return [_profile_doc(doc, rel, fmt, opts)]
     if fmt == "yaml":
         with open(path, encoding="utf-8", errors="replace") as f:
             docs = list(yaml.safe_load_all(f))
+        if len(docs) > 1:
+            # A trailing or doubled "---" yields empty documents, which are not rows.
+            docs = [d for d in docs if d is not None]
         doc = docs[0] if len(docs) == 1 else docs
         return [_profile_doc(doc, rel, fmt, opts)]
     raise ValueError(f"unknown format {fmt}")
@@ -65,17 +80,18 @@ def stats_from_series(s: pl.Series, type_name: str) -> FieldStats:
     st.count = s.len()
     if st.count == 0:
         return st
-    if type_name in ("int", "float", "date", "datetime", "time", "str"):
-        st.min, st.max = s.min(), s.max()
+    if type_name in _MINMAX_TYPES:
+        st.min, st.max = iso_temporal(s.min()), iso_temporal(s.max())
     if type_name in ("int", "float"):
         st.sum = float(s.sum())
-    if type_name == "str":
+    if s.dtype == pl.String:
         lens = s.str.len_chars()
         st.min_len, st.max_len = int(lens.min()), int(lens.max())
     if type_name in _TOP_TYPES:
-        vc = s.value_counts(sort=True).head(TOP_CAP)
-        st.top = Counter(dict(zip(vc[s.name].to_list(), vc["count"].to_list())))
-    if s.dtype.is_nested() or s.n_unique() > DISTINCT_CAP:
+        # A fixed count column name avoids a clash with a data column named "count".
+        vc = s.value_counts(sort=True, name="__tuna_count__").head(TOP_CAP)
+        st.top = Counter(dict(zip(vc[s.name].to_list(), vc["__tuna_count__"].to_list())))
+    if s.dtype.is_nested() or s.dtype == pl.Object or s.n_unique() > DISTINCT_CAP:
         st.distinct = None
     else:
         st.distinct = set(s.unique().to_list())
@@ -112,23 +128,32 @@ def _sniff(path: Path, fmt: str) -> str:
 
 
 def _read_csv(path: Path, rel: str, fmt: str, opts: ReadOptions) -> TableProfile:
-    sep = _sniff(path, fmt)
+    common: dict[str, Any] = {
+        "separator": _sniff(path, fmt),
+        "encoding": "utf8-lossy",
+        "truncate_ragged_lines": True,
+    }
+    m = opts.schema_rows
     n = opts.sample_rows
-    common: dict[str, Any] = {"separator": sep, "encoding": "utf8-lossy", "truncate_ragged_lines": True}
     warnings: list[str] = []
     try:
-        kw = dict(common, infer_schema_length=n or 10000, try_parse_dates=True)
-        df = pl.read_csv(path, n_rows=n, **kw)
+        schema = pl.scan_csv(path, infer_schema_length=m, try_parse_dates=True, **common).collect_schema()
     except Exception as e:  # noqa: BLE001 - any inference failure falls back to text
         warnings.append(f"type inference failed, read as text: {str(e).splitlines()[0]}")
-        kw = dict(common, infer_schema=False)
-        df = pl.read_csv(path, n_rows=n, **kw)
+        schema = pl.scan_csv(path, infer_schema=False, **common).collect_schema()
+    # The schema always comes from the first schema_rows rows, also with --full.
+    kw = dict(common, schema=schema, n_rows=n)
+    try:
+        df = pl.read_csv(path, **kw)
+    except Exception:  # noqa: BLE001 - later values that do not fit the schema become null
+        df = pl.read_csv(path, ignore_errors=True, **kw)
+        warnings.append("some values did not match the type inferred from the first rows; read as null")
+    if n is not None and df.height == n:
+        rows = pl.scan_csv(path, infer_schema=False, **common).select(pl.len()).collect().item()
+    else:
+        rows = df.height
     if df.columns and df.columns[0].startswith("﻿"):
         df = df.rename({df.columns[0]: df.columns[0].lstrip("﻿")})
-    if n is None or df.height < n:
-        rows = df.height
-    else:
-        rows = pl.scan_csv(path, **kw).select(pl.len()).collect().item()
     return _profile_frame(df, rel, None, fmt, rows, opts, warnings)
 
 
@@ -228,7 +253,8 @@ def stats_from_values(values: list[Any]) -> FieldStats:
             st.distinct = None
             continue
         if t != "bool":
-            st.min, st.max = safe_min(st.min, v), safe_max(st.max, v)
+            iv = iso_temporal(v)
+            st.min, st.max = safe_min(st.min, iv), safe_max(st.max, iv)
         if t in ("int", "float"):
             st.sum += v
         if t == "str":

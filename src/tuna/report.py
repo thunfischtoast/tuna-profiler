@@ -13,7 +13,7 @@ from tuna.model import FieldStats, FileError, TableProfile
 from tuna.patterns import NamePattern, infer_patterns
 from tuna.types import display_type
 
-_MINMAX_TYPES = {"int", "float", "date", "datetime", "time"}
+_MINMAX_TYPES = {"int", "float", "date", "datetime", "time", "duration"}
 
 
 @dataclass
