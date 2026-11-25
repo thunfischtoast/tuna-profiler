@@ -72,6 +72,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--full", action="store_true", help="read all rows for stats")
     p.add_argument("--sample-rows", type=_at_least(1), default=1000, metavar="N", help="rows per file for stats (default 1000)")
     p.add_argument("--no-stats", action="store_true", help="schema and row counts only")
+    p.add_argument("--strict-types", action="store_true", help="split structures on type conflicts (v1 behavior)")
     p.add_argument("--include", action="append", default=[], metavar="GLOB", help="only matching files (repeatable)")
     p.add_argument("--exclude", action="append", default=[], metavar="GLOB", help="skip matching files and dirs (repeatable)")
     p.add_argument("--max-depth", type=_at_least(0), metavar="N", help="0 = only files directly in PATH")
@@ -101,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         files, ignored = discover(root, args.include, args.exclude, args.max_depth, args.hidden)
         outputs = {o.resolve() for o in args.output}
         files = [f for f in files if f.resolve() not in outputs]
+        ignored = [f for f in ignored if f.resolve() not in outputs]
     except ValueError as e:
         parser.error(str(e))
 
@@ -134,8 +136,10 @@ def main(argv: list[str] | None = None) -> int:
         "max_depth": args.max_depth,
         "hidden": args.hidden,
         "min_pattern_files": args.min_pattern_files,
+        "strict_types": args.strict_types,
     }
-    report = build_report(str(root), tables, errors, ignored, options, time.perf_counter() - start)
+    ignored_rel = [f.relative_to(base).as_posix() for f in ignored]
+    report = build_report(str(root), tables, errors, ignored_rel, options, time.perf_counter() - start)
     for out in args.output:
         out.write_text(_RENDERERS[out.suffix.lower()](report), encoding="utf-8")
     if not args.quiet:

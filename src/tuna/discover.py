@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import fnmatch
 import os
-from collections import Counter
 from pathlib import Path
 
 FORMATS: dict[str, str] = {
@@ -29,8 +28,8 @@ def discover(
     exclude: list[str] | None = None,
     max_depth: int | None = None,
     hidden: bool = False,
-) -> tuple[list[Path], Counter]:
-    """Return supported files (sorted) and a counter of ignored extensions.
+) -> tuple[list[Path], list[Path]]:
+    """Return supported files and files with other extensions, both sorted.
 
     ``include``/``exclude`` globs match the path relative to ``root`` (posix) or the
     basename; ``exclude`` also prunes directories. ``max_depth=0`` keeps only files
@@ -38,7 +37,7 @@ def discover(
     """
     include = include or []
     exclude = exclude or []
-    ignored: Counter = Counter()
+    ignored: list[Path] = []
     if root.is_file():
         if root.suffix.lower() not in FORMATS:
             raise ValueError(f"unsupported file type: {root.suffix or root.name}")
@@ -72,6 +71,7 @@ def discover(
             if ext in FORMATS:
                 found.append(here / f)
             else:
-                ignored[ext or "(none)"] += 1
+                ignored.append(here / f)
     found.sort(key=lambda p: p.relative_to(root).as_posix())
+    ignored.sort(key=lambda p: p.relative_to(root).as_posix())
     return found, ignored

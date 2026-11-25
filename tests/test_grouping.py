@@ -82,3 +82,15 @@ def test_largest_group_first():
     small = [_t("s.csv", q="str")]
     big = [_t(f"b{i}.csv", x="int") for i in range(3)]
     assert group_tables(small + big)[0] == big
+
+
+def test_empty_array_children_are_optional_in_report():
+    from tuna.report import build_report
+
+    full = [_t(f"f{i}.json", **S2) for i in range(3)]
+    empty = _t("e.json", id="int", **{"structures[]": "array"})
+    rep = build_report(".", [*full, empty], [], [], {}, 0.0)
+    (group,) = rep.groups
+    present = {f.name: f.present_in for f in group.fields}
+    assert present["structures[]"] == 4
+    assert present["structures[].f0"] == 3

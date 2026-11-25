@@ -10,8 +10,8 @@ from typing import Any
 
 from tuna.grouping import group_tables
 from tuna.model import FieldStats, FileError, TableProfile
-from tuna.patterns import NamePattern, infer_patterns
-from tuna.types import display_type
+from tuna.patterns import NamePattern, infer_pattern_members, infer_patterns, split_ext
+from tuna.types import display_type, families
 
 _MINMAX_TYPES = {"int", "float", "date", "datetime", "time", "duration"}
 
@@ -32,17 +32,7 @@ class FieldSummary:
     min_len: int | None = None
     max_len: int | None = None
     top: list[list[Any]] | None = None
-
-
-@dataclass
-class Location:
-    """Where a group occurs: one folder, its name patterns and unpatterned files."""
-
-    folder: str
-    files: int
-    patterns: list[NamePattern]
-    unmatched: list[str]
-    sheets: list[str]
+    type_variants: dict[str, int] | None = None  # display type -> tables, only on conflicts
 
 
 @dataclass
@@ -64,17 +54,29 @@ class Group:
     formats: list[str]
     rows_total: int
     fields: list[FieldSummary]
-    locations: list[Location]
+    paths: list[NamePattern]
+    unmatched: list[str]
+    sheets: list[str]
     members: list[Member]
 
 
 @dataclass
-class FolderSummary:
-    """Which groups occur in a folder: (group id, table count) pairs."""
+class FileSet:
+    """Unsupported files of one extension, listed but not read."""
 
-    folder: str
+    ext: str
     files: int
-    groups: list[tuple[str, int]]
+    paths: list[NamePattern]
+    unmatched: list[str]
+
+
+@dataclass
+class FolderPattern:
+    """Folders with the same contents: (structure id or file-set ext, file count) pairs."""
+
+    pattern: str
+    folders: int
+    contents: list[tuple[str, int]]
 
 
 @dataclass
@@ -90,7 +92,8 @@ class Report:
     errors: list[FileError]
     warnings: list[FileError]
     groups: list[Group]
-    folders: list[FolderSummary]
+    file_sets: list[FileSet]
+    folders: list[FolderPattern]
     options: dict[str, Any]
 
 
@@ -111,6 +114,9 @@ def _summarize_field(name: str, members: list[TableProfile]) -> FieldSummary:
     types: set[str] = set().union(*(t.fields[name] for t in having))
     shown = display_type(types)
     fs = FieldSummary(name, shown, len(having))
+    variants = Counter(display_type(t.fields[name]) for t in having if families(t.fields[name]))
+    if len({families(set(v.split("|"))) for v in variants}) > 1:
+        fs.type_variants = dict(variants.most_common())
     parts = [t.stats[name] for t in having if name in t.stats]
     if not parts:
         return fs
@@ -131,23 +137,52 @@ def _summarize_field(name: str, members: list[TableProfile]) -> FieldSummary:
     return fs
 
 
-def _locations(members: list[TableProfile], min_files: int) -> list[Location]:
-    by_folder: dict[str, list[TableProfile]] = defaultdict(list)
+def _sheets(members: list[TableProfile]) -> list[str]:
+    per_file: dict[str, set[str]] = defaultdict(set)
     for t in members:
-        by_folder[_folder(t.path)].append(t)
+        if t.sheet is not None:
+            per_file[t.path].add(t.sheet)
+    sets = {frozenset(v) for v in per_file.values()}
+    return sorted(next(iter(sets))) if len(sets) == 1 else []
+
+
+def ext_of(path: str) -> str:
+    """Lowercased extension of a path's last segment, ``(none)`` if it has none."""
+    return split_ext(path)[1].lower() or "(none)"
+
+
+def _file_sets(ignored: list[str], min_files: int) -> list[FileSet]:
+    by_ext: dict[str, list[str]] = defaultdict(list)
+    for path in ignored:
+        by_ext[ext_of(path)].append(path)
+    sets = []
+    for ext, paths in by_ext.items():
+        patterns, unmatched = infer_patterns(sorted(paths), min_files)
+        sets.append(FileSet(ext, len(paths), patterns, unmatched))
+    sets.sort(key=lambda f: (-f.files, f.ext))
+    return sets
+
+
+def _folder_patterns(
+    folder_contents: dict[str, Counter], order: dict[str, int], min_files: int
+) -> list[FolderPattern]:
+    """Collapse folders with the same content signature into folder-path patterns."""
+    by_sig: dict[tuple[str, ...], list[str]] = defaultdict(list)
+    for folder, contents in folder_contents.items():
+        by_sig[tuple(sorted(contents, key=order.__getitem__))].append(folder)
+
+    def summed(folders: list[str]) -> list[tuple[str, int]]:
+        total: Counter = Counter()
+        for f in folders:
+            total.update(folder_contents[f])
+        return sorted(total.items(), key=lambda x: order[x[0]])
+
     out = []
-    for folder in sorted(by_folder):
-        tables = by_folder[folder]
-        sheets_per_file: dict[str, set[str]] = defaultdict(set)
-        for t in tables:
-            sheets_per_file[posixpath.basename(t.path)].add(t.sheet or "")
-        names = sorted(sheets_per_file)
-        patterns, unmatched = infer_patterns(names, min_files)
-        sheet_sets = {frozenset(s) for s in sheets_per_file.values()}
-        sheets: list[str] = []
-        if len(sheet_sets) == 1 and "" not in next(iter(sheet_sets)):
-            sheets = sorted(next(iter(sheet_sets)))
-        out.append(Location(folder, len(names), patterns, unmatched, sheets))
+    for folders in by_sig.values():
+        covered, unmatched = infer_pattern_members(sorted(folders), min_files)
+        out += [FolderPattern(p.pattern, p.files, summed(members)) for p, members in covered]
+        out += [FolderPattern(f, 1, summed([f])) for f in unmatched]
+    out.sort(key=lambda f: (-f.folders, f.pattern))
     return out
 
 
@@ -155,39 +190,43 @@ def build_report(
     root: str,
     tables: list[TableProfile],
     errors: list[FileError],
-    ignored: Counter,
+    ignored: list[str],
     opts: dict[str, Any],
     duration: float,
 ) -> Report:
-    """Group the tables and summarize groups, locations and folders."""
+    """Group the tables and summarize groups, file sets and folders.
+
+    ``ignored`` holds the relative paths of unsupported files.
+    """
     min_files = opts.get("min_pattern_files", 3)
     groups = []
-    for i, members in enumerate(group_tables(tables), 1):
-        fields = [_summarize_field(n, members) for n in _field_order(members)]
+    folder_contents: dict[str, Counter] = defaultdict(Counter)
+    for i, members in enumerate(group_tables(tables, opts.get("strict_types", False)), 1):
+        gid = f"S{i}"
+        files = sorted({t.path for t in members})
+        for f in files:
+            folder_contents[_folder(f)][gid] += 1
+        paths, unmatched = infer_patterns(files, min_files)
         groups.append(
             Group(
-                id=f"S{i}",
+                id=gid,
                 tables=len(members),
-                files=len({t.path for t in members}),
+                files=len(files),
                 formats=sorted({t.format for t in members}),
                 rows_total=sum(t.rows for t in members),
-                fields=fields,
-                locations=_locations(members, min_files),
+                fields=[_summarize_field(n, members) for n in _field_order(members)],
+                paths=paths,
+                unmatched=unmatched,
+                sheets=_sheets(members),
                 members=[Member(t.path, t.sheet, t.rows) for t in members],
             )
         )
-
-    folder_files: dict[str, set[str]] = defaultdict(set)
-    folder_groups: dict[str, Counter] = defaultdict(Counter)
-    for g in groups:
-        for m in g.members:
-            folder_files[_folder(m.path)].add(m.path)
-            folder_groups[_folder(m.path)][g.id] += 1
+    file_sets = _file_sets(ignored, min_files)
+    for path in ignored:
+        folder_contents[_folder(path)][ext_of(path)] += 1
     order = {g.id: i for i, g in enumerate(groups)}
-    folders = [
-        FolderSummary(f, len(folder_files[f]), sorted(folder_groups[f].items(), key=lambda x: order[x[0]]))
-        for f in sorted(folder_files)
-    ]
+    order.update({fs.ext: len(groups) + i for i, fs in enumerate(file_sets)})
+
     profiled = {t.path for t in tables}
     return Report(
         root=root,
@@ -195,13 +234,14 @@ def build_report(
         duration_s=round(duration, 2),
         files_found=len(profiled) + len(errors),
         files_profiled=len(profiled),
-        ignored=dict(sorted(ignored.items())),
+        ignored=dict(sorted(Counter(ext_of(p) for p in ignored).items())),
         errors=errors,
         warnings=[
             FileError(f"{t.path} [{t.sheet}]" if t.sheet else t.path, w) for t in tables for w in t.warnings
         ],
         groups=groups,
-        folders=folders,
+        file_sets=file_sets,
+        folders=_folder_patterns(folder_contents, order, min_files),
         options=opts,
     )
 
@@ -242,3 +282,19 @@ def fmt_top(top: list[list[Any]] | None, n: int = 3) -> str:
     if not top or (top[0][1] == 1 and len(top) > 1):
         return ""
     return ", ".join(f"{fmt_value(v, 15)} ({c})" for v, c in top[:n])
+
+
+PATTERN_CAP = 20
+
+
+def fmt_type(f: FieldSummary, tables: int) -> str:
+    """Field type plus the minority type variants, as ``int|str (str in 3/511)``."""
+    if not f.type_variants:
+        return f.type
+    minority = list(f.type_variants.items())[1:]
+    return f.type + " " + ", ".join(f"({t} in {n}/{tables})" for t, n in minority)
+
+
+def fmt_contents(contents: list[tuple[str, int]]) -> str:
+    """``S1 (40), .dcm (2000)``."""
+    return ", ".join(f"{k} ({n})" for k, n in contents)

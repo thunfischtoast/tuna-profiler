@@ -158,6 +158,14 @@ def infer_patterns(paths: list[str], min_files: int) -> tuple[list[NamePattern],
     there are ``min_files`` of them. Returns the patterns (largest first) and the paths
     no pattern covers.
     """
+    covered, unmatched = infer_pattern_members(paths, min_files)
+    return [p for p, _ in covered], unmatched
+
+
+def infer_pattern_members(
+    paths: list[str], min_files: int
+) -> tuple[list[tuple[NamePattern, list[str]]], list[str]]:
+    """Like ``infer_patterns``, but pair each pattern with the paths it covers."""
     shapes: dict[tuple, list[tuple[str, list[tuple[str, str]]]]] = defaultdict(list)
     for name in paths:
         stem, ext = split_ext(name)
@@ -165,13 +173,13 @@ def infer_patterns(paths: list[str], min_files: int) -> tuple[list[NamePattern],
         shape = (ext.lower(), tuple((k, t if k == "other" else "") for k, t in toks))
         shapes[shape].append((name, toks))
 
-    patterns: list[NamePattern] = []
+    covered: list[tuple[NamePattern, list[str]]] = []
     leftover: list[str] = []
     for members in shapes.values():
         if len(members) >= min_files:
             member_names = [n for n, _ in members]
             ext = split_ext(member_names[0])[1]
-            patterns.append(_shape_pattern(member_names, [t for _, t in members], ext))
+            covered.append((_shape_pattern(member_names, [t for _, t in members], ext), member_names))
         else:
             leftover.extend(n for n, _ in members)
 
@@ -187,7 +195,7 @@ def infer_patterns(paths: list[str], min_files: int) -> tuple[list[NamePattern],
         prefix = os.path.commonprefix(stems)
         rest = [s[len(prefix):] for s in stems]
         suffix = os.path.commonprefix([r[::-1] for r in rest])[::-1]
-        patterns.append(NamePattern(f"{prefix}{{*}}{suffix}{split_ext(group[0])[1]}", len(group)))
+        covered.append((NamePattern(f"{prefix}{{*}}{suffix}{split_ext(group[0])[1]}", len(group)), group))
 
-    patterns.sort(key=lambda p: (-p.files, p.pattern))
-    return patterns, sorted(unmatched)
+    covered.sort(key=lambda c: (-c[0].files, c[0].pattern))
+    return covered, sorted(unmatched)

@@ -35,21 +35,25 @@ def test_tree(tree, tmp_path):
     assert rep["files_found"] == 8 and rep["files_profiled"] == 7
     sales = rep["groups"][0]
     assert sales["tables"] == 6
-    loc = {loc["folder"]: loc for loc in sales["locations"]}
-    (pattern,) = loc["data/2024"]["patterns"]
-    assert pattern["pattern"] == "sales_{date:YYYY-MM-DD}.csv"
+    (pattern,) = sales["paths"]
+    assert pattern["pattern"] == "data/2024/sales_{date:YYYY-MM-DD}.csv"
     assert pattern["files"] == 5
-    assert loc["data/other"]["unmatched"] == ["a.csv"]
+    assert sales["unmatched"] == ["data/other/a.csv"]
+    assert [(f["ext"], f["files"], f["unmatched"]) for f in rep["file_sets"]] == [(".txt", 1, ["notes.txt"])]
+    folders = {f["pattern"]: f for f in rep["folders"]}
+    assert folders["data/2024"]["contents"] == [["S1", 5]]
+    assert folders["."]["contents"] == [[".txt", 1]]
     amount = next(f for f in sales["fields"] if f["name"] == "amount")
     assert amount["type"] == "float" and amount["min"] == 1.0 and amount["max"] == 5.5
-    assert "sales_{date:YYYY-MM-DD}.csv" in md
+    assert "data/2024/sales_{date:YYYY-MM-DD}.csv" in md
+    assert "## File sets" in md
     assert len(sales["members"]) == 6
 
 
 def test_single_file(tree, tmp_path):
     _, rep = _run([tree / "cfg" / "app.yaml"], tmp_path)
     assert rep["files_profiled"] == 1
-    assert [f["folder"] for f in rep["folders"]] == ["."]
+    assert [f["pattern"] for f in rep["folders"]] == ["."]
     assert [f["name"] for f in rep["groups"][0]["fields"]] == ["name", "port"]
 
 
@@ -132,3 +136,25 @@ def test_terminal_output(tree, capsys):
     out = capsys.readouterr().out
     assert "S1" in out and "sales_{date:YYYY-MM-DD}.csv" in out
     assert "broken.json" in out
+
+
+def test_strict_types(tmp_path):
+    root = tmp_path / "t"
+    root.mkdir()
+    for i in range(3):
+        (root / f"a{i}.csv").write_text("x,y\n1,a\n", encoding="utf-8")
+    (root / "b.csv").write_text("x,y\nfoo,a\n", encoding="utf-8")
+    _, rep = _run([root], tmp_path)
+    (group,) = rep["groups"]
+    x = group["fields"][0]
+    assert x["type_variants"] == {"int": 3, "str": 1}
+    _, strict = _run([root, "--strict-types"], tmp_path)
+    assert len(strict["groups"]) == 2
+
+
+def test_terminal_shows_file_sets(tree, capsys):
+    for i in range(3):
+        (tree / f"scan_{i}.dcm").write_bytes(b"")
+    assert cli.main([str(tree)]) == 0
+    out = capsys.readouterr().out
+    assert ".dcm" in out and "scan_{int}.dcm" in out

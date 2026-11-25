@@ -11,25 +11,36 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-from tuna.report import Group, Report, fmt_rows, fmt_top, fmt_value, plural
+from tuna.patterns import NamePattern
+from tuna.report import (
+    PATTERN_CAP,
+    Group,
+    Report,
+    fmt_contents,
+    fmt_rows,
+    fmt_top,
+    fmt_type,
+    fmt_value,
+    plural,
+)
 
 ERROR_CAP = 20
-UNMATCHED_CAP = 5
+UNMATCHED_CAP = 10
 
 
-def _locations(g: Group) -> Tree:
-    tree = Tree("[bold]locations[/]", guide_style="dim")
-    for loc in g.locations:
-        node = tree.add(f"[cyan]{escape(loc.folder)}[/]  [dim]{plural(loc.files, 'file')}[/]")
-        for p in loc.patterns:
-            ranges = escape("  ".join(f"{k}: {v}" for k, v in p.ranges.items()))
-            node.add(f"[green]{escape(p.pattern)}[/]  [dim]{plural(p.files, 'file')}[/]  {ranges}")
-        if loc.unmatched:
-            names = escape(", ".join(loc.unmatched[:UNMATCHED_CAP]))
-            more = len(loc.unmatched) - UNMATCHED_CAP
-            node.add(names + (f" [dim]… {more} more[/]" if more > 0 else ""))
-        if loc.sheets:
-            node.add("[dim]sheets:[/] " + escape(", ".join(loc.sheets)))
+def _paths(label: str, patterns: list[NamePattern], unmatched: list[str], sheets: list[str]) -> Tree:
+    tree = Tree(f"[bold]{label}[/]", guide_style="dim")
+    for p in patterns[:PATTERN_CAP]:
+        ranges = escape("  ".join(f"{k}: {v}" for k, v in p.ranges.items()))
+        tree.add(f"[green]{escape(p.pattern)}[/]  [dim]{plural(p.files, 'file')}[/]  {ranges}")
+    if len(patterns) > PATTERN_CAP:
+        tree.add(f"[dim]… {len(patterns) - PATTERN_CAP} more patterns[/]")
+    if unmatched:
+        names = escape(", ".join(unmatched[:UNMATCHED_CAP]))
+        more = len(unmatched) - UNMATCHED_CAP
+        tree.add(names + (f" [dim]… {more} more[/]" if more > 0 else ""))
+    if sheets:
+        tree.add("[dim]sheets:[/] " + escape(", ".join(sheets)))
     return tree
 
 
@@ -45,7 +56,7 @@ def _fields(g: Group) -> Table:
         present = "all" if f.present_in == g.tables else f"{f.present_in}/{g.tables}"
         nulls = "" if f.nulls_pct is None else f"{f.nulls_pct:g}"
         last = fmt_value(f.max) if f.max is not None else fmt_top(f.top)
-        cells = (f.name, f.type, present, nulls, fmt_value(f.distinct), fmt_value(f.min), last)
+        cells = (f.name, fmt_type(f, g.tables), present, nulls, fmt_value(f.distinct), fmt_value(f.min), last)
         t.add_row(*(Text(c) for c in cells))
     return t
 
@@ -64,12 +75,19 @@ def render_terminal(report: Report, console: Console | None = None) -> None:
                  f"{fmt_rows(g.rows_total)} · {plural(len(g.fields), 'field')}")
         if g.tables != g.files:
             title += f" · {plural(g.tables, 'table')}"
-        console.print(Panel(RichGroup(_locations(g), _fields(g)), title=title, title_align="left"))
+        console.print(Panel(RichGroup(_paths("paths", g.paths, g.unmatched, g.sheets), _fields(g)), title=title, title_align="left"))
+    for fs in report.file_sets:
+        title = f"[bold]{escape(fs.ext)}[/]  {plural(fs.files, 'file')} · not read"
+        console.print(Panel(_paths("paths", fs.paths, fs.unmatched, []), title=title, title_align="left"))
     if len(report.folders) > 1:
         tree = Tree("[bold]folders[/]", guide_style="dim")
-        for f in report.folders:
-            groups = ", ".join(f"{gid} ({n})" for gid, n in f.groups)
-            tree.add(f"[cyan]{escape(f.folder)}[/]  [dim]{plural(f.files, 'file')}[/]  {groups}")
+        for f in report.folders[:PATTERN_CAP]:
+            tree.add(
+                f"[cyan]{escape(f.pattern)}[/]  [dim]{plural(f.folders, 'folder')}[/]  "
+                + escape(fmt_contents(f.contents))
+            )
+        if len(report.folders) > PATTERN_CAP:
+            tree.add(f"[dim]… {len(report.folders) - PATTERN_CAP} more[/]")
         console.print(tree)
     if report.errors:
         console.print(Text(f"errors ({len(report.errors)})", style="bold red"))
