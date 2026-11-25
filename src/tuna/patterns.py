@@ -24,7 +24,9 @@ _TEMPORAL = [
 _TEMPORAL_RE = [(k, re.compile(rx + r"(?!\d)"), f) for k, rx, f in _TEMPORAL]
 _TEMPORAL_FORMATS = {k: f for k, _, f in _TEMPORAL}
 _UID = re.compile(r"\d+(?:\.\d+){3,}(?![\d.])")
-_HEX = re.compile(r"(?<![0-9a-fA-F])(?:[0-9a-f]{6,}|[0-9A-F]{6,})(?![0-9a-fA-F])")
+# Each case has its own boundaries, so a hex id may follow a word of the other case
+# (IMAGE0b00d147, case0B00D147).
+_HEX = re.compile(r"(?<![0-9a-f])[0-9a-f]{6,}(?![0-9a-f])|(?<![0-9A-F])[0-9A-F]{6,}(?![0-9A-F])")
 _RUN = re.compile(r"\d+|[A-Za-z]+|[^A-Za-z\d]+")
 _EXT = re.compile(r"\.[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*$")
 _DISTINCT_KINDS = {"alpha": "{alpha}", "uuid": "{uuid}", "hex": "{hex}", "uid": "{uid}"}

@@ -118,3 +118,16 @@ def test_performance_600k_paths():
     print(f"infer_patterns on 600k paths: {elapsed:.1f} s")
     assert patterns[0].files == 600_000
     assert elapsed < 20
+
+
+def test_hex_after_word_of_other_case():
+    from tuna.patterns import tokenize
+
+    for word in ("IMAGE", "CASE", "CODE"):
+        assert tokenize(f"{word}0b00d147") == [("alpha", word), ("hex", "0b00d147")]
+        assert tokenize(f"{word}ffe12a90") == [("alpha", word), ("hex", "ffe12a90")]
+    for word in ("image", "case", "code"):
+        assert tokenize(f"{word}0B00D147") == [("alpha", word), ("hex", "0B00D147")]
+        assert tokenize(f"{word}FFE12A90") == [("alpha", word), ("hex", "FFE12A90")]
+    assert tokenize("deadbeef12") == [("hex", "deadbeef12")]
+    assert tokenize("CASEFILE") == [("alpha", "CASEFILE")]
