@@ -29,10 +29,40 @@ def test_null_column_merges():
     assert len(group_tables([a, b])) == 1
 
 
-def test_str_vs_int_splits():
+def test_str_vs_int_splits_with_strict_types():
     a = _t("a.csv", x="int", y="str")
     b = _t("b.csv", x="str", y="str")
-    assert len(group_tables([a, b])) == 2
+    assert len(group_tables([a, b], strict_types=True)) == 2
+
+
+def test_type_conflict_joins_by_default():
+    a = _t("a.csv", x="int", y="str")
+    b = _t("b.csv", x="str", y="str")
+    assert len(group_tables([a, b])) == 1
+
+
+def test_empty_string_file_joins():
+    a = _t("a.json", x="int", y="str")
+    b = _t("b.json", x="int|null", y="null")
+    assert len(group_tables([a, b], strict_types=True)) == 1
+
+
+S2 = {"id": "int", "structures[]": "array", **{f"structures[].f{i}": "str" for i in range(16)}}
+
+
+def test_empty_array_rule():
+    full = [_t(f"f{i}.json", **S2) for i in range(3)]
+    empty = _t("e.json", id="int", **{"structures[]": "array"})
+    groups = group_tables([*full, empty])
+    assert len(groups) == 1
+    reverse = group_tables([empty, empty, empty, full[0]])
+    assert len(reverse) == 1
+
+
+def test_tiny_table_does_not_join_large_one():
+    big = [_t(f"b{i}.csv", **{c: "int" for c in "abcdefghij"}) for i in range(3)]
+    tiny = _t("t.csv", a="int")
+    assert len(group_tables([*big, tiny])) == 2
 
 
 def test_low_similarity_splits():
