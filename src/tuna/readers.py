@@ -162,7 +162,7 @@ def _read_excel(path: Path, rel: str, opts: ReadOptions) -> list[TableProfile]:
     out = []
     skipped = []
     for name in reader.sheet_names:
-        sheet = reader.load_sheet(name, n_rows=opts.sample_rows)
+        sheet = reader.load_sheet(name, n_rows=opts.sample_rows, schema_sample_rows=opts.schema_rows)
         df = sheet.to_polars()
         if df.width == 0:
             skipped.append(name)

@@ -191,3 +191,18 @@ def test_temporal_minmax_normalized():
     a.merge(stats_from_series(pl.Series("t", [dt.datetime(2024, 3, 1, 8)]), "datetime"))  # noqa: DTZ001
     assert a.min == "2023-12-01"
     assert a.max == "2024-03-01T08:00:00"
+
+
+def test_xlsx_full_keeps_sampled_schema(tmp_path):
+    p = tmp_path / "late.xlsx"
+    wb = xlsxwriter.Workbook(p)
+    ws = wb.add_worksheet("s")
+    ws.write_row(0, 0, ["a"])
+    for i in range(1, 6):
+        ws.write(i, 0, i)
+    ws.write(6, 0, "x")
+    wb.close()
+    sampled = read_file(p, "late.xlsx", "xlsx", ReadOptions(sample_rows=3, schema_rows=3))[0]
+    full = read_file(p, "late.xlsx", "xlsx", ReadOptions(sample_rows=None, schema_rows=3))[0]
+    assert full.fields == sampled.fields
+    assert full.rows == sampled.rows == 6
