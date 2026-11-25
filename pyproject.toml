@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = ["polars", "fastexcel", "pyyaml", "rich"]
 
 [project.scripts]
-tuna = "tuna.cli:main"
+tuna-profiler = "tuna.cli:main"
 
 [dependency-groups]
 dev = ["pytest", "xlsxwriter"]

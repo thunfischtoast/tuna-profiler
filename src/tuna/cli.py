@@ -65,7 +65,7 @@ def _at_least(low: int):
 
 
 def _parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="tuna", description="Profile the structure of data files in a folder.")
+    p = argparse.ArgumentParser(prog="tuna-profiler", description="Profile the structure of data files in a folder.")
     p.add_argument("path", metavar="PATH", type=Path)
     p.add_argument("-o", "--output", action="append", default=[], metavar="FILE", type=Path,
                    help=".md or .json by extension (repeatable)")
@@ -81,7 +81,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("-j", "--jobs", type=_at_least(1), default=os.cpu_count() or 1, metavar="N",
                    help="worker processes (default: CPU count)")
     p.add_argument("-q", "--quiet", action="store_true", help="no terminal output")
-    p.add_argument("--version", action="version", version=f"tuna {__version__}")
+    p.add_argument("--version", action="version", version=f"tuna-profiler {__version__}")
     return p
 
 

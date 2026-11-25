@@ -21,17 +21,17 @@ tuna needs Python 3.10 or newer.
 ## Usage
 
 ```
-tuna PATH [options]
+tuna-profiler PATH [options]
 ```
 
 PATH is a folder or a single file. Examples:
 
 ```
-tuna data/                              # summary in the terminal
-tuna data/ -o report.md -o report.json  # also write Markdown and JSON
-tuna data/ --full                       # statistics over all rows
-tuna data/ --no-stats --max-depth 1     # schema only, top two levels
-tuna data/ --exclude "archive" --include "*.csv"
+tuna-profiler data/                              # summary in the terminal
+tuna-profiler data/ -o report.md -o report.json  # also write Markdown and JSON
+tuna-profiler data/ --full                       # statistics over all rows
+tuna-profiler data/ --no-stats --max-depth 1     # schema only, top two levels
+tuna-profiler data/ --exclude "archive" --include "*.csv"
 ```
 
 Sample terminal output:
