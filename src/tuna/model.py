@@ -83,7 +83,7 @@ class TableProfile:
 
 @dataclass
 class FileError:
-    """A file that could not be read."""
+    """A message about one file: a read error, or a warning from a table that was read."""
 
     path: str
     message: str

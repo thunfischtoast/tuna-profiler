@@ -77,3 +77,9 @@ def render_terminal(report: Report, console: Console | None = None) -> None:
             console.print(f"  {e.path}: {e.message}", markup=False)
         if len(report.errors) > ERROR_CAP:
             console.print(f"  … {len(report.errors) - ERROR_CAP} more")
+    if report.warnings:
+        console.print(Text(f"warnings ({len(report.warnings)})", style="bold yellow"))
+        for w in report.warnings[:ERROR_CAP]:
+            console.print(f"  {w.path}: {w.message}", markup=False)
+        if len(report.warnings) > ERROR_CAP:
+            console.print(f"  … {len(report.warnings) - ERROR_CAP} more")

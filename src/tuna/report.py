@@ -87,6 +87,7 @@ class Report:
     files_profiled: int
     ignored: dict[str, int]
     errors: list[FileError]
+    warnings: list[FileError]
     groups: list[Group]
     folders: list[FolderSummary]
     options: dict[str, Any]
@@ -194,6 +195,9 @@ def build_report(
         files_profiled=len(profiled),
         ignored=dict(sorted(ignored.items())),
         errors=errors,
+        warnings=[
+            FileError(f"{t.path} [{t.sheet}]" if t.sheet else t.path, w) for t in tables for w in t.warnings
+        ],
         groups=groups,
         folders=folders,
         options=opts,

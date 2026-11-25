@@ -54,7 +54,7 @@ Sample terminal output:
 The same structure in the Markdown report:
 
 ```markdown
-### S1 — order_id, customer, amount
+### S1: order_id, customer, amount
 
 40 tables in 40 files · csv · 2.0k rows · 4 fields
 

@@ -29,7 +29,7 @@ def _unmatched(names: list[str]) -> str:
 def _group(g: Group) -> list[str]:
     title = ", ".join(f.name for f in g.fields[:3]) or "(no fields)"
     out = [
-        f"### {g.id} — {title}",
+        f"### {g.id}: {title}",
         "",
         (
             f"{plural(g.tables, 'table')} in {plural(g.files, 'file')} · {', '.join(g.formats)} · "
@@ -75,6 +75,7 @@ def render_markdown(report: Report) -> str:
             ["files profiled", report.files_profiled],
             ["ignored", ignored],
             ["errors", len(report.errors)],
+            ["warnings", len(report.warnings)],
             ["structures", len(report.groups)],
         ]),
         "",
@@ -92,5 +93,9 @@ def render_markdown(report: Report) -> str:
     if report.errors:
         out += ["## Errors", ""]
         out += _table(["file", "error"], [[e.path, e.message] for e in report.errors])
+        out.append("")
+    if report.warnings:
+        out += ["## Warnings", ""]
+        out += _table(["file", "warning"], [[w.path, w.message] for w in report.warnings])
         out.append("")
     return "\n".join(out)

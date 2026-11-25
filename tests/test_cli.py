@@ -75,3 +75,11 @@ def test_bad_args(tree, tmp_path):
     with pytest.raises(SystemExit) as e:
         cli.main([str(tree), "-o", str(tmp_path / "r.txt")])
     assert e.value.code == 2
+
+
+def test_table_warnings_reach_reports(tmp_path):
+    p = tmp_path / "a.csv"
+    p.write_text("a,b\n1,2\n3,4\nx,5\n", encoding="utf-8")
+    md, rep = _run([p, "--sample-rows", "2"], tmp_path)
+    assert len(rep["warnings"]) == 1 and "text" in rep["warnings"][0]["message"]
+    assert "## Warnings" in md
